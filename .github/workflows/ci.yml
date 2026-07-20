@@ -1,0 +1,42 @@
+name: ci
+
+# Runs on PRs (as the merge gate) and on pushes to main (to catch anything that
+# lands without a PR, and to give the post-merge signal we monitor).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-checks:
+    name: static-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install project
+        run: uv sync --all-extras
+
+      - name: Lint (ruff)
+        run: uv run ruff check src tests
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check src tests
+
+      - name: Type check (mypy strict)
+        run: uv run mypy
+
+      - name: Tests
+        run: uv run pytest -q

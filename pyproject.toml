@@ -1,0 +1,62 @@
+[project]
+name = "netdbg"
+version = "0.1.0"
+description = "Distributed home network monitoring and diagnosis"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+agent = [
+    "icmplib>=3.0",
+    "dnspython>=2.6",
+    "httpx>=0.27",
+    "psutil>=5.9",
+    "pydantic-settings>=2.2",
+]
+server = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic-settings>=2.2",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "mypy>=1.9",
+    "ruff>=0.4",
+    "time-machine>=2.14",
+]
+
+[project.scripts]
+netdbg-agent = "netdbg_agent.main:main"
+netdbg-server = "netdbg_server.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/netdbg_common", "src/netdbg_agent", "src/netdbg_server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["icmplib.*", "psutil.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
