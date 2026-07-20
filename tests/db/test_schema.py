@@ -138,6 +138,26 @@ def test_touch_probe_seen_uses_server_time(db: sqlite3.Connection) -> None:
     assert probe.clock_offset_ms == -250
 
 
+def test_registration_does_not_set_last_seen(db: sqlite3.Connection) -> None:
+    """Registering is not reporting.
+
+    A probe that registers and then goes silent -- never shipping a single sample --
+    must stay distinguishable from a healthy one. That gap is exactly what
+    probe_silence detection looks for, so only an actual ingest may advance
+    last_seen_ts.
+    """
+    probe = get_probe(db, "probe-a")
+    assert probe is not None
+    assert probe.last_seen_ts is None, "registration must not count as reporting"
+
+    with transaction(db):
+        upsert_probe(db, "probe-a", ProbeInfo(name="pi-wired"), NOW + 60_000)
+
+    probe = get_probe(db, "probe-a")
+    assert probe is not None
+    assert probe.last_seen_ts is None, "re-registration must not count either"
+
+
 # ---------------------------------------------------------------------------
 # Probes
 # ---------------------------------------------------------------------------

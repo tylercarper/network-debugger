@@ -60,3 +60,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    # Starlette's TestClient warns that it uses httpx rather than httpx2. Nothing to
+    # act on until FastAPI's own testclient migrates; tracked in #23.
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
