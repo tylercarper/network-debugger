@@ -73,6 +73,24 @@ and the cause is freshest right now.
 After merging, `merge` watches the resulting main run to completion. A merge is not done
 until that run is green. If it fails, fix it before starting anything else.
 
+### Verify enforcement by attempting it, not by reading config
+
+`main` is protected with `static-checks` required and `enforce_admins: true`. That last
+flag is load-bearing: with it `false`, an admin-scoped token's direct pushes are let
+through with a `Bypassed rule violations` *warning* rather than rejected — so the API
+returns a protection config that looks correct while nothing is actually blocked.
+
+A correct rejection looks like:
+
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+ ! [remote rejected] HEAD -> main (protected branch hook declined)
+```
+
+The general lesson, which cost a stray commit on `main` to learn: when verifying that a
+guard works, **attempt the thing and check the resulting state.** Empty or ambiguous
+command output is not evidence of a block. `git rev-parse origin/main` tells the truth.
+
 ### Scope
 
 One PR per working chunk — a feature that stands on its own and passes its gate. Do not
