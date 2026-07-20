@@ -55,7 +55,9 @@ class Shipper:
         self._client = client or httpx.Client(timeout=config.ship_timeout_s)
         self._consecutive_failures = 0
         self._probe_id = spool.get_identity(_IDENTITY_PROBE_ID)
-        self._token = spool.get_identity(_IDENTITY_TOKEN)
+        # An empty token is how clear_identity() marks credentials as revoked; treat it
+        # as absent rather than as a valid-but-empty token.
+        self._token = spool.get_identity(_IDENTITY_TOKEN) or None
 
     @property
     def probe_id(self) -> str | None:
@@ -105,6 +107,17 @@ class Shipper:
         self._spool.set_identity(_IDENTITY_PROBE_ID, parsed.probe_id)
         self._spool.set_identity(_IDENTITY_TOKEN, parsed.token)
         return True
+
+    def clear_identity(self) -> None:
+        """Forget credentials so the next cycle re-registers.
+
+        Used when the server rejects auth: the stored token is definitively no good, so
+        retrying with it is pointless. The ``probe_id`` is deliberately kept in the
+        spool, so re-registration resumes the same probe's history rather than starting
+        a new one.
+        """
+        self._token = None
+        self._spool.set_identity(_IDENTITY_TOKEN, "")
 
     # -- shipping ----------------------------------------------------------
 
