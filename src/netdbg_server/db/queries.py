@@ -76,21 +76,26 @@ def upsert_probe(
     ``display_name``, ``group_name``, ``location``, and ``status`` are deliberately
     absent from the UPDATE clause -- renaming a probe in the admin UI has to survive the
     agent restarting.
+
+    ``last_seen_ts`` is also deliberately not set here. It means "when did this probe
+    last report data", and registration is not a data report. Setting it would make a
+    probe that registered and then went silent -- never shipping a single sample --
+    indistinguishable from a healthy one, which is precisely the case ``probe_silence``
+    detection exists to catch. Only :func:`touch_probe_seen` advances it.
     """
     conn.execute(
         """
         INSERT INTO probes (
             probe_id, name, link_type, os_name, os_version, agent_version,
-            capabilities, status, first_seen_ts, last_seen_ts
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            capabilities, status, first_seen_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(probe_id) DO UPDATE SET
             name          = excluded.name,
             link_type     = excluded.link_type,
             os_name       = excluded.os_name,
             os_version    = excluded.os_version,
             agent_version = excluded.agent_version,
-            capabilities  = excluded.capabilities,
-            last_seen_ts  = excluded.last_seen_ts
+            capabilities  = excluded.capabilities
         """,
         (
             probe_id,
@@ -101,7 +106,6 @@ def upsert_probe(
             info.agent_version,
             json.dumps(info.capabilities),
             str(status),
-            now_ms,
             now_ms,
         ),
     )
