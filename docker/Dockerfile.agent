@@ -1,0 +1,27 @@
+# Probe agent image.
+#
+# Runs with cap_add: [NET_RAW] so privileged ICMP uses the *same code path* as
+# production rather than a fake. WiFi telemetry is the one subsystem that cannot be
+# exercised here -- containers have no wireless interface -- so it is faked from U8
+# onward and verified on real hardware.
+FROM python:3.11-slim
+
+# iproute2 provides `ip -j route`, which is how the agent discovers its gateway on
+# Linux. Without it the probe still runs, but with no gateway target.
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+RUN pip install --no-cache-dir -e ".[agent]"
+
+ENV NETDBG_STATE_DIR=/state \
+    PYTHONUNBUFFERED=1
+
+VOLUME ["/state"]
+
+CMD ["netdbg-agent"]
