@@ -1,0 +1,106 @@
+# Local development environment.
+#
+# Everything here runs on a laptop with no special hardware. Probe containers get
+# NET_RAW so privileged ICMP exercises the *same code path* as production rather than a
+# fake -- the pings against the Docker gateway and the real internet are genuine.
+#
+# The one subsystem that cannot be exercised locally is WiFi telemetry: containers have
+# no wireless interface. That is faked from U8 onward and verified on real hardware.
+#
+# Note this diverges from production deliberately: the Pi runs the server natively under
+# systemd, because Docker inserts a network layer between the monitor and the host stack,
+# which is exactly the thing being measured. Both paths therefore need exercising.
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "8080:8080"
+    volumes:
+      - server-data:/data
+    environment:
+      NETDBG_DB_PATH: /data/netdbg.db
+    healthcheck:
+      # Probes wait on this: registering against a server whose schema is still being
+      # created would fail and burn a backoff cycle for no reason.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v1/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Stands in for the wired Pi and desktop probes. Real ICMP to the Docker gateway and
+  # to both external anchors.
+  probe-wired:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+    cap_add:
+      - NET_RAW
+    volumes:
+      - probe-wired-state:/state
+    environment:
+      NETDBG_SERVER_URL: http://server:8080
+      NETDBG_NAME: sim-wired
+      NETDBG_SHIP_INTERVAL_S: "5"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  # Stands in for a probe near an access point. Identical to the wired probe until U8
+  # adds WiFi telemetry; the separate service exists so the multi-probe correlation
+  # views have more than one vantage point to work with.
+  probe-ap1:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+    cap_add:
+      - NET_RAW
+    volumes:
+      - probe-ap1-state:/state
+    environment:
+      NETDBG_SERVER_URL: http://server:8080
+      NETDBG_NAME: sim-ap-living-room
+      NETDBG_SHIP_INTERVAL_S: "5"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  probe-ap2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+    cap_add:
+      - NET_RAW
+    volumes:
+      - probe-ap2-state:/state
+    environment:
+      NETDBG_SERVER_URL: http://server:8080
+      NETDBG_NAME: sim-ap-office
+      NETDBG_SHIP_INTERVAL_S: "5"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  # One-shot: fabricates seven days of history so the timeline views and retention
+  # logic have something to work against. Twenty minutes of live data is not enough to
+  # develop a 7-day view.
+  #
+  # Opt in with: docker compose --profile seed up seeder
+  seeder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    volumes:
+      - server-data:/data
+    command: ["python", "-m", "netdbg_server.seeder", "--db", "/data/netdbg.db", "--days", "7"]
+    profiles: ["seed"]
+
+volumes:
+  server-data:
+  probe-wired-state:
+  probe-ap1-state:
+  probe-ap2-state:

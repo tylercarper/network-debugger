@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from netdbg_agent.collectors.gateway import discover_gateway
 from netdbg_agent.collectors.icmp import IcmpTarget, ping_target
 from netdbg_agent.config import AgentConfig
+from netdbg_agent.ship_worker import ShipWorker
 from netdbg_agent.shipper import Shipper
 from netdbg_agent.spool import Spool
 from netdbg_common.enums import EventType, LinkType, Severity
@@ -157,10 +158,11 @@ class AgentRunner:
         self._pending_clock_steps.clear()
 
     def ship_if_due(self, now_mono: float | None = None) -> None:
-        """Attempt delivery when the backoff schedule allows.
+        """Ship inline. **For tests and single-shot use only.**
 
-        Failure is expected and unremarkable here -- the network being unreachable is
-        the condition this system exists to observe.
+        The production loop uses :class:`ShipWorker` on a background thread instead. A
+        blackholed server makes this call block for the full connect timeout, stalling
+        collection during exactly the outage the probe exists to observe -- see #27.
         """
         now_mono = now_mono if now_mono is not None else time.monotonic()
         if now_mono < self._next_ship_at:
@@ -183,31 +185,45 @@ class AgentRunner:
     # -- main loop ---------------------------------------------------------
 
     def run_forever(self, cycle_interval_s: float = 1.0) -> None:  # pragma: no cover
-        """Measure on a jittered interval, shipping when due.
+        """Measure on a jittered interval; a background thread handles delivery.
+
+        Collection and shipping are deliberately decoupled. Shipping can block for
+        seconds against a blackholed server, and **a measurement not taken cannot be
+        recovered** -- unlike a delayed shipment, which the spool absorbs. So the
+        collection loop must never wait on the network.
 
         Jitter keeps several probes on one network from synchronizing their bursts,
-        which would make them contend with each other and distort the very measurements
-        they exist to take.
+        which would make them contend and distort the very measurements they exist to
+        take.
         """
-        self.ensure_registered()
+        worker = ShipWorker(
+            config=self.config,
+            spool=self.spool,
+            shipper=self.shipper,
+            probe_info=self.probe_info(),
+            clock=self.clock,
+        )
+        worker.start()
         last_trim = time.monotonic()
 
-        while True:
-            cycle_start = time.monotonic()
-            try:
-                self.collect_once()
-                self.ship_if_due(cycle_start)
+        try:
+            while True:
+                cycle_start = time.monotonic()
+                try:
+                    self.collect_once()
 
-                if cycle_start - last_trim > self.config.spool_trim_check_interval_s:
-                    dropped = self.spool.trim()
-                    if dropped:
-                        log.warning("spool over capacity; dropped %d oldest rows", dropped)
-                    last_trim = cycle_start
-            except Exception:
-                # A collector bug must not kill the agent. Losing one cycle is far
-                # better than losing every cycle after it.
-                log.exception("cycle failed; continuing")
+                    if cycle_start - last_trim > self.config.spool_trim_check_interval_s:
+                        dropped = self.spool.trim()
+                        if dropped:
+                            log.warning("spool over capacity; dropped %d oldest rows", dropped)
+                        last_trim = cycle_start
+                except Exception:
+                    # A collector bug must not kill the agent. Losing one cycle is far
+                    # better than losing every cycle after it.
+                    log.exception("cycle failed; continuing")
 
-            elapsed = time.monotonic() - cycle_start
-            jitter = random.uniform(0, cycle_interval_s * 0.1)
-            time.sleep(max(0.0, cycle_interval_s - elapsed + jitter))
+                elapsed = time.monotonic() - cycle_start
+                jitter = random.uniform(0, cycle_interval_s * 0.1)
+                time.sleep(max(0.0, cycle_interval_s - elapsed + jitter))
+        finally:
+            worker.stop()

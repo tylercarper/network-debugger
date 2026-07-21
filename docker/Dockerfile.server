@@ -1,0 +1,22 @@
+# Server image. Used for local development only -- the Pi runs the server natively
+# under systemd, because Docker inserts a network layer between the monitor and the
+# host stack, which is precisely the thing being measured.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy dependency metadata first so the install layer caches across source edits.
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+RUN pip install --no-cache-dir -e ".[server]"
+
+ENV NETDBG_DB_PATH=/data/netdbg.db \
+    NETDBG_HOST=0.0.0.0 \
+    NETDBG_PORT=8080 \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8080
+VOLUME ["/data"]
+
+CMD ["netdbg-server"]

@@ -23,6 +23,7 @@ Three properties are non-negotiable:
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,16 +89,28 @@ class Spool:
 
     def __init__(self, db_path: str | Path, max_rows: int = 2_000_000) -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path), isolation_level=None)
+        # check_same_thread=False because the collection loop writes while the shipping
+        # thread drains -- that separation is what stops a blocked network call from
+        # stalling measurement (#27). Every access is guarded by the lock below, so the
+        # connection is still only ever used serially.
+        self._conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._max_rows = max_rows
+
+        # Serializes access across the two threads. Required, not merely defensive:
+        # claim_batch and add_samples both run multi-statement transactions, and
+        # interleaving them would corrupt the claim bookkeeping that guarantees no
+        # measurement is deleted before the server confirms it.
+        self._lock = threading.RLock()
+
         self._reclaim_orphans()
 
     # -- lifecycle ---------------------------------------------------------
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def _reclaim_orphans(self) -> None:
         """Release claims left behind by a crash.
@@ -107,20 +120,23 @@ class Spool:
         re-sent, and the server's ``batch_id`` idempotency makes a repeat harmless.
         Re-sending a duplicate is recoverable; dropping data is not.
         """
-        self._conn.execute("UPDATE spool SET batch_id = NULL WHERE batch_id IS NOT NULL")
+        with self._lock:
+            self._conn.execute("UPDATE spool SET batch_id = NULL WHERE batch_id IS NOT NULL")
 
     # -- identity ----------------------------------------------------------
 
     def get_identity(self, key: str) -> str | None:
-        row = self._conn.execute("SELECT value FROM identity WHERE key = ?", (key,)).fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM identity WHERE key = ?", (key,)).fetchone()
         return None if row is None else str(row["value"])
 
     def set_identity(self, key: str, value: str) -> None:
-        self._conn.execute(
-            "INSERT INTO identity (key, value) VALUES (?, ?)"
-            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO identity (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
 
     # -- writing -----------------------------------------------------------
 
@@ -141,16 +157,17 @@ class Spool:
         """
         if not rows:
             return 0
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            self._conn.executemany(
-                "INSERT INTO spool (kind, ts, payload) VALUES (?, ?, ?)",
-                [(kind, ts, payload) for ts, payload in rows],
-            )
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
-        self._conn.execute("COMMIT")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.executemany(
+                    "INSERT INTO spool (kind, ts, payload) VALUES (?, ?, ?)",
+                    [(kind, ts, payload) for ts, payload in rows],
+                )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
         return len(rows)
 
     # -- shipping ----------------------------------------------------------
@@ -164,22 +181,24 @@ class Spool:
 
         Claiming is a marker, not a removal: rows survive until delivery is confirmed.
         """
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            rows = self._conn.execute(
-                "SELECT id, kind, payload FROM spool WHERE batch_id IS NULL ORDER BY id LIMIT ?",
-                (limit,),
-            ).fetchall()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._conn.execute(
+                    "SELECT id, kind, payload FROM spool WHERE batch_id IS NULL"
+                    " ORDER BY id LIMIT ?",
+                    (limit,),
+                ).fetchall()
 
-            if rows:
-                self._conn.executemany(
-                    "UPDATE spool SET batch_id = ? WHERE id = ?",
-                    [(batch_id, r["id"]) for r in rows],
-                )
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
-        self._conn.execute("COMMIT")
+                if rows:
+                    self._conn.executemany(
+                        "UPDATE spool SET batch_id = ? WHERE id = ?",
+                        [(batch_id, r["id"]) for r in rows],
+                    )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
 
         samples: list[Sample] = []
         wifi: list[WifiSample] = []
@@ -197,13 +216,17 @@ class Spool:
 
     def confirm_batch(self, batch_id: str) -> int:
         """Delete a delivered batch. Called only after the server confirms receipt."""
-        cur = self._conn.execute("DELETE FROM spool WHERE batch_id = ?", (batch_id,))
-        return cur.rowcount
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM spool WHERE batch_id = ?", (batch_id,))
+            return cur.rowcount
 
     def release_batch(self, batch_id: str) -> int:
         """Return a failed batch to the queue for retry."""
-        cur = self._conn.execute("UPDATE spool SET batch_id = NULL WHERE batch_id = ?", (batch_id,))
-        return cur.rowcount
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE spool SET batch_id = NULL WHERE batch_id = ?", (batch_id,)
+            )
+            return cur.rowcount
 
     # -- bounds ------------------------------------------------------------
 
@@ -222,33 +245,39 @@ class Spool:
         if excess <= 0:
             return 0
 
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            cur = self._conn.execute(
-                "DELETE FROM spool WHERE id IN ("
-                "  SELECT id FROM spool ORDER BY (batch_id IS NOT NULL), id LIMIT ?"
-                ")",
-                (excess,),
-            )
-            dropped = cur.rowcount
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
-        self._conn.execute("COMMIT")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM spool WHERE id IN ("
+                    "  SELECT id FROM spool ORDER BY (batch_id IS NOT NULL), id LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+                dropped = cur.rowcount
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
         return dropped
 
     # -- introspection -----------------------------------------------------
 
     def pending_count(self) -> int:
-        return int(self._conn.execute("SELECT COUNT(*) FROM spool").fetchone()[0])
+        with self._lock:
+            return int(self._conn.execute("SELECT COUNT(*) FROM spool").fetchone()[0])
 
     def unclaimed_count(self) -> int:
-        return int(
-            self._conn.execute("SELECT COUNT(*) FROM spool WHERE batch_id IS NULL").fetchone()[0]
-        )
+        with self._lock:
+            return int(
+                self._conn.execute("SELECT COUNT(*) FROM spool WHERE batch_id IS NULL").fetchone()[
+                    0
+                ]
+            )
 
     def oldest_ts(self) -> int | None:
-        row = self._conn.execute("SELECT MIN(ts) AS t FROM spool").fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT MIN(ts) AS t FROM spool").fetchone()
         return None if row["t"] is None else int(row["t"])
 
     def stats(self) -> dict[str, object]:
@@ -267,5 +296,6 @@ class Spool:
 
     def _raw_payloads(self) -> list[str]:
         """Test hook: every payload as stored, to assert byte-level preservation."""
-        rows = self._conn.execute("SELECT payload FROM spool ORDER BY id")
+        with self._lock:
+            rows = self._conn.execute("SELECT payload FROM spool ORDER BY id").fetchall()
         return [str(r["payload"]) for r in rows]
