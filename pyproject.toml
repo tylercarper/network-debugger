@@ -57,6 +57,13 @@ files = ["src", "tests"]
 module = ["icmplib.*", "psutil.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# dnspython ships a py.typed marker but types its exception constructors as untyped
+# callables, so constructing them (only in tests) trips no-untyped-call. Nothing to fix
+# on our side; disable just that check for the DNS test module.
+module = ["tests.agent.test_dns_probe"]
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
