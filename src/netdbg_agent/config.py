@@ -25,6 +25,15 @@ class AgentConfig(BaseSettings):
     state_dir: Path = Path("data/agent")
     """Holds the spool database and the persisted probe identity."""
 
+    # --- Collector cadences -------------------------------------------------
+    # ICMP runs every tick (the 1s fast loop) and so has no interval here. The rest run
+    # slower: DNS and HTTP are more expensive and would rate-limit the probed services
+    # if run every second, and interface state changes slowly.
+
+    iface_interval_s: float = 5.0
+    dns_interval_s: float = 10.0
+    http_interval_s: float = 15.0
+
     # --- Shipping -----------------------------------------------------------
 
     ship_interval_s: float = 5.0
