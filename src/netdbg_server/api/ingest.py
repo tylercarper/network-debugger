@@ -33,6 +33,7 @@ from netdbg_server.db.queries import (
     touch_probe_seen,
     upsert_probe,
 )
+from netdbg_server.detect.engine import DetectionEngine
 
 router = APIRouter(prefix="/api/v1", tags=["ingest"])
 
@@ -40,6 +41,13 @@ router = APIRouter(prefix="/api/v1", tags=["ingest"])
 def _db(request: Request) -> sqlite3.Connection:
     conn: sqlite3.Connection = request.app.state.db
     return conn
+
+
+def _detection_engine() -> DetectionEngine:
+    # A rule-free-of-state engine, cheap to construct; kept as a function so the import
+    # stays local to where it is used and does not couple ingest to detection at module
+    # load time.
+    return DetectionEngine()
 
 
 @router.post("/register", response_model=RegisterResponse)
@@ -159,6 +167,15 @@ def ingest(
         # probe", which is what probe_silence detection needs. Agent time would make a
         # backfill of old samples look like a fresh check-in.
         touch_probe_seen(conn, probe_id, recv_ts, clock_offset_ms)
+
+    # After the batch is committed, if it carried samples older than where detection has
+    # already processed, rewind the watermark so the affected window is re-detected. This
+    # is what turns late-arriving outage data into detected events instead of a silent
+    # gap -- and it must run outside the ingest transaction so a detection hiccup can
+    # never roll back accepted measurements.
+    if batch.samples:
+        oldest_ts = min(s.ts for s in batch.samples)
+        _detection_engine().rewind_for_backfill(conn, probe_id, oldest_ts)
 
     return IngestResponse(
         accepted=accepted,

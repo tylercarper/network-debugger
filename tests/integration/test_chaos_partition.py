@@ -70,7 +70,10 @@ def server(tmp_path: Path) -> Iterator[LiveServer]:
     db_path = tmp_path / "server.db"
     port = _free_port()
     config = uvicorn.Config(
-        create_app(ServerConfig(db_path=db_path)), host="127.0.0.1", port=port, log_level="error"
+        create_app(ServerConfig(db_path=db_path, detection_interval_s=0)),
+        host="127.0.0.1",
+        port=port,
+        log_level="error",
     )
     uv = uvicorn.Server(config)
     thread = threading.Thread(target=uv.run, daemon=True)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -256,14 +257,29 @@ def main() -> None:
     parser.add_argument("--now-ms", type=int, default=None)
     args = parser.parse_args()
 
-    if args.db.exists() and args.db.stat().st_size > 0:
-        # Never silently double-seed: a second run would overlay a second set of
-        # incidents on the first and make the data meaningless.
-        print(f"{args.db} already exists; skipping seed")
+    # Guard on "has samples", not "file exists": the server's lifespan calls init_db on
+    # startup, which creates a non-empty (schema-only) file before the seeder ever runs.
+    # A file-existence guard would then always skip. What the guard actually protects
+    # against is overlaying a second set of incidents on data that already has some.
+    if args.db.exists() and args.db.stat().st_size > 0 and _has_samples(args.db):
+        print(f"{args.db} already contains samples; skipping seed")
         return
 
     stats = seed(args.db, days=args.days, interval_ms=args.interval_ms, now_ms=args.now_ms)
     print(json.dumps(stats, indent=2))
+
+
+def _has_samples(db_path: Path) -> bool:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='samples'"
+        ).fetchone()
+        if row is None:
+            return False
+        return int(conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]) > 0
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
