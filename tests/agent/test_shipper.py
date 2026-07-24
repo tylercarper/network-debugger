@@ -54,7 +54,7 @@ class LiveServer:
 @pytest.fixture
 def server(tmp_path: Path) -> Iterator[LiveServer]:
     db_path = tmp_path / "server.db"
-    cfg = ServerConfig(db_path=db_path)
+    cfg = ServerConfig(db_path=db_path, detection_interval_s=0)
     port = _free_port()
     config = uvicorn.Config(create_app(cfg), host="127.0.0.1", port=port, log_level="error")
     uv_server = uvicorn.Server(config)

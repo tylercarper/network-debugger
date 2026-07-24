@@ -25,7 +25,7 @@ NOW = 1_700_000_000_000
 
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
-    cfg = ServerConfig(db_path=tmp_path / "api.db")
+    cfg = ServerConfig(db_path=tmp_path / "api.db", detection_interval_s=0)
     with TestClient(create_app(cfg)) as c:
         yield c
 

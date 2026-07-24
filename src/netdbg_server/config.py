@@ -45,6 +45,15 @@ class ServerConfig(BaseSettings):
     it is stored with the offset so correlation can degrade its confidence later.
     """
 
+    detection_interval_s: float = 30.0
+    """How often the server runs detection over stored samples. 0 disables the loop.
+
+    Server-side and periodic, not inline on ingest: the agent is on the broken side of
+    the network so detection must be authoritative here, and running it on a timer keeps
+    a slow pass from ever delaying a probe's report. Tests set this to 0 and drive the
+    engine directly.
+    """
+
     config_revision: int = 1
     """Bumped when probe config changes; agents refetch only when it moves.
 
