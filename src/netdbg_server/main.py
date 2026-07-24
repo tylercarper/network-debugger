@@ -17,6 +17,7 @@ from netdbg_server.api.detect import router as detect_router
 from netdbg_server.api.ingest import router as ingest_router
 from netdbg_server.config import ServerConfig, get_config
 from netdbg_server.db.engine import init_db
+from netdbg_server.detect.correlate import Correlator
 from netdbg_server.detect.engine import DetectionEngine
 
 __all__ = ["create_app", "main"]
@@ -25,23 +26,39 @@ log = logging.getLogger("netdbg.server")
 
 
 async def _detection_loop(app: FastAPI, interval_s: float) -> None:
-    """Run detection over every probe on a fixed cadence.
+    """Run detection then correlation over every probe on a fixed cadence.
 
-    Detection is authoritative and server-side precisely because the agent is on the
-    broken side of the network; running it here on a timer -- rather than inline on
-    ingest -- keeps a slow detection pass from ever delaying a probe's report.
+    Both are authoritative and server-side precisely because the agent is on the broken
+    side of the network; running them here on a timer -- rather than inline on ingest --
+    keeps a slow pass from ever delaying a probe's report. Correlation runs after
+    detection so it groups the events that pass just produced.
     """
     engine = DetectionEngine()
+    correlator = Correlator()
+
+    def _pass() -> None:
+        now = utc_now_ms()
+        engine.run_all(app.state.db, now)
+        # Correlate a trailing window: recent enough to catch just-detected events, wide
+        # enough that an incident spanning the last pass boundary is still grouped whole.
+        correlator.correlate(app.state.db, now - _CORRELATION_WINDOW_MS, now)
+
     while True:
         try:
             await asyncio.sleep(interval_s)
             # SQLite work is synchronous; hand it to a thread so the event loop (and thus
-            # ingest) is never blocked by a detection pass over a large window.
-            await asyncio.to_thread(engine.run_all, app.state.db, utc_now_ms())
+            # ingest) is never blocked by a pass over a large window.
+            await asyncio.to_thread(_pass)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("detection pass failed; will retry next interval")
+            log.exception("detection/correlation pass failed; will retry next interval")
+
+
+# How far back correlation looks each pass. Comfortably longer than any single incident
+# and than the pass interval, so an incident straddling a pass boundary is still grouped
+# as one rather than split.
+_CORRELATION_WINDOW_MS = 3_600_000
 
 
 def create_app(config: ServerConfig | None = None) -> FastAPI:
