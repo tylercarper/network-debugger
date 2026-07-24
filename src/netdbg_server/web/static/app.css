@@ -1,0 +1,214 @@
+/* Dashboard styling. Theme-aware (light/dark), no build step.
+ *
+ * Status colours are the skill's reserved status palette -- they encode ordered STATE
+ * (good -> warning -> serious -> critical), not identity, and every use is paired with a
+ * text label so meaning never rests on colour alone. */
+
+:root {
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --bg: #fcfcfb;
+  --surface: #ffffff;
+  --border: #e2e2df;
+  --ink: #1a1a19;
+  --ink-muted: #6b6b68;
+  --accent: #2563a8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a19;
+    --surface: #242422;
+    --border: #38382f;
+    --ink: #ececea;
+    --ink-muted: #9a9a94;
+    --accent: #6ba3e8;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19;
+  --surface: #242422;
+  --border: #38382f;
+  --ink: #ececea;
+  --ink-muted: #9a9a94;
+  --accent: #6ba3e8;
+}
+:root[data-theme="light"] {
+  --bg: #fcfcfb;
+  --surface: #ffffff;
+  --border: #e2e2df;
+  --ink: #1a1a19;
+  --ink-muted: #6b6b68;
+  --accent: #2563a8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 1.1rem; margin: 0; }
+header .sub { color: var(--ink-muted); font-size: 0.85rem; }
+header .spacer { flex: 1; }
+header a { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+.section-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  margin: 1.5rem 0 0.75rem;
+}
+
+/* --- status tiles ------------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  /* A left rail carries the status colour; the label text carries the meaning. */
+  border-left: 4px solid var(--border);
+}
+.tile.good { border-left-color: var(--good); }
+.tile.warning { border-left-color: var(--warning); }
+.tile.serious { border-left-color: var(--serious); }
+.tile.critical { border-left-color: var(--critical); }
+.tile .name { font-weight: 600; display: flex; align-items: center; gap: 0.4rem; }
+.tile .badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  color: #fff;
+}
+.badge.good { background: var(--good); }
+.badge.warning { background: var(--warning); color: #1a1a19; }
+.badge.serious { background: var(--serious); }
+.badge.critical { background: var(--critical); }
+.badge.stale { background: var(--ink-muted); }
+.tile .meta { color: var(--ink-muted); font-size: 0.82rem; margin-top: 0.35rem; }
+.tile .link-type { font-size: 0.72rem; color: var(--ink-muted); }
+
+/* --- incident summary --------------------------------------------------- */
+
+.incident {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.incident .scope {
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  color: #fff;
+}
+.scope.all_probes { background: var(--critical); }
+.scope.wifi_only { background: var(--serious); }
+.scope.single_ap { background: var(--warning); color: #1a1a19; }
+.scope.single_probe { background: var(--ink-muted); }
+.incident .body { flex: 1; }
+.incident .when { color: var(--ink-muted); font-size: 0.8rem; }
+.incident .hypothesis { margin-top: 0.25rem; }
+
+.empty { color: var(--ink-muted); padding: 1rem 0; }
+
+/* --- timeline ----------------------------------------------------------- */
+
+.timeline {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+}
+.lane {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.lane .label { font-size: 0.85rem; }
+.lane .label .grp { color: var(--ink-muted); font-size: 0.72rem; }
+.ribbon {
+  height: 26px;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  background: var(--border);
+  min-width: 600px;
+}
+.ribbon .seg { height: 100%; }
+.seg.good { background: var(--good); }
+.seg.warning { background: var(--warning); }
+.seg.serious { background: var(--serious); }
+.seg.critical { background: var(--critical); }
+.seg.nodata { background: var(--border); }
+
+.axis {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 0.75rem;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  margin-top: 0.25rem;
+}
+.axis .ticks { display: flex; justify-content: space-between; min-width: 600px; }
+
+.legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+.legend .item { display: flex; align-items: center; gap: 0.35rem; }
+.legend .swatch { width: 14px; height: 14px; border-radius: 3px; }
+.swatch.good { background: var(--good); }
+.swatch.warning { background: var(--warning); }
+.swatch.serious { background: var(--serious); }
+.swatch.critical { background: var(--critical); }
+.swatch.nodata { background: var(--border); }
+
+.controls { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.controls button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+.controls button.active { border-color: var(--accent); color: var(--accent); }

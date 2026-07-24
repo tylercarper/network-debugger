@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>netdbg — home network monitor</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header>
+    <h1>netdbg</h1>
+    <span class="sub">home network monitor</span>
+    <span class="spacer"></span>
+    <span id="status" class="sub">loading…</span>
+    <a href="/docs">API</a>
+  </header>
+
+  <main>
+    <!-- Overview: is it happening now, and did anything happen recently -->
+    <div class="section-title">Probe status</div>
+    <div id="tiles" class="tiles"></div>
+
+    <div class="section-title">Recent incidents</div>
+    <div id="incidents"></div>
+
+    <!-- The flagship: correlated multi-probe timeline -->
+    <div class="section-title">Timeline — read vertically to spot the scope</div>
+    <div class="controls">
+      <button data-range="1h">1h</button>
+      <button data-range="6h">6h</button>
+      <button data-range="24h" class="active">24h</button>
+      <button data-range="7d">7d</button>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="swatch good"></span> ok</span>
+      <span class="item"><span class="swatch warning"></span> degraded</span>
+      <span class="item"><span class="swatch serious"></span> heavy loss</span>
+      <span class="item"><span class="swatch critical"></span> down</span>
+      <span class="item"><span class="swatch nodata"></span> no data</span>
+    </div>
+    <div class="timeline">
+      <div id="lanes"></div>
+      <div id="axis" class="axis"></div>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
