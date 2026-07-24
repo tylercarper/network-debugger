@@ -11,10 +11,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from netdbg_common.timeutil import utc_now_ms
 from netdbg_server.api.detect import router as detect_router
 from netdbg_server.api.ingest import router as ingest_router
+from netdbg_server.api.series import router as series_router
 from netdbg_server.config import ServerConfig, get_config
 from netdbg_server.db.engine import init_db
 from netdbg_server.detect.correlate import Correlator
@@ -105,6 +108,16 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     )
     app.include_router(ingest_router)
     app.include_router(detect_router)
+    app.include_router(series_router)
+
+    web_dir = Path(__file__).parent / "web"
+    app.mount("/static", StaticFiles(directory=web_dir / "static"), name="static")
+
+    @app.get("/", include_in_schema=False)
+    def dashboard() -> FileResponse:
+        """The dashboard is the root page; the JSON API lives under /api and /docs."""
+        return FileResponse(web_dir / "index.html")
+
     return app
 
 
